@@ -203,3 +203,136 @@ def visualizar_outliers_bivariados(dataframe, vr, tamano_grafica = (20, 15)):
             axes[indice].set(xlabel=None, ylabel = None)
 
         plt.tight_layout()
+
+def explorar_outliers_if(dataframe, df_rellenar, var_dependiente, indice_contaminacion=[0.01, 0.05, 0.1], estimadores=1000, colores={-1: "red", 1: "grey"}, grafica_size = (20, 15)):
+        """
+        Detecta outliers en un DataFrame utilizando el algoritmo Isolation Forest y visualiza los resultados.
+
+        Params:
+            - var_dependiente : str. Nombre de la variable dependiente que se usará en los gráficos de dispersión.
+        
+            - indice_contaminacion : list of float, opcional. Lista de valores de contaminación a usar en el algoritmo Isolation Forest. La contaminación representa
+            la proporción de outliers esperados en el conjunto de datos. Por defecto es [0.01, 0.05, 0.1].
+        
+            - estimadores : int, opcional. Número de estimadores (árboles) a utilizar en el algoritmo Isolation Forest. Por defecto es 1000.
+        
+            - colores : dict, opcional. Diccionario que asigna colores a los valores de predicción de outliers del algoritmo Isolation Forest.
+            Por defecto, los outliers se muestran en rojo y los inliers en gris ({-1: "red", 1: "grey"}).
+        
+        Returns:
+            Esta función no retorna ningún valor, pero crea y muestra gráficos de dispersión que visualizan los outliers
+        detectados para cada valor de contaminación especificado.
+        """
+        df_num = dataframe.select_dtypes(include=np.number)
+        df_if = df_rellenar.copy()
+
+        col_numericas = df_num.columns.to_list()
+
+        num_filas = math.ceil(len(col_numericas) / 2)
+        for contaminacion in indice_contaminacion: 
+            
+            ifo = IsolationForest(random_state=42, 
+                                n_estimators=estimadores, 
+                                contamination=contaminacion,
+                                max_samples="auto",  
+                                n_jobs=-1)
+            ifo.fit(dataframe[col_numericas])
+            prediccion_ifo = ifo.predict(dataframe[col_numericas])
+            
+
+            fig, axes = plt.subplots(num_filas, 2, figsize=grafica_size) 
+            axes = axes.flat
+            for indice, columna in enumerate(col_numericas):
+                df_if[f"outlier_{contaminacion}_{columna}_isoforest"] = prediccion_ifo
+                if columna == var_dependiente:
+                    fig.delaxes(axes[indice])
+
+                else:
+                    # Visualizar los outliers en un gráfico
+                    sns.scatterplot(x=var_dependiente, 
+                                    y=columna, 
+                                    data=df_if,
+                                    hue=f"outlier_{contaminacion}_{columna}_isoforest", 
+                                    palette=colores, 
+                                    style=f"outlier_{contaminacion}_{columna}_isoforest", 
+                                    size=2,
+                                    ax=axes[indice])
+                    
+                    axes[indice].set_title(f"Contaminación = {contaminacion} y columna {columna.upper()}")
+                    plt.tight_layout()
+                
+            print(f"se ha hecho outlier_{contaminacion}_{columna}_isoforest")           
+            if len(col_numericas) % 2 != 0:
+                fig.delaxes(axes[-1])
+            
+        print("Se devuelve df Modificado")
+        return df_if
+
+def explorar_outliers_lof(dataframe,df_rellenar, var_dependiente, indice_contaminacion=[0.01, 0.05, 0.1], vecinos=[600, 1200, 1500, 2000], colores={-1: "red", 1: "grey"}, grafica_size = (20, 15)):
+    """
+    Detecta outliers en un DataFrame utilizando el algoritmo Local Outlier Factor (LOF) y visualiza los resultados.
+
+    Params:
+        - var_dependiente : str. Nombre de la variable dependiente que se usará en los gráficos de dispersión.
+        
+        - indice_contaminacion : list of float, opcional. Lista de valores de contaminación a usar en el algoritmo LOF. La contaminación representa
+        la proporción de outliers esperados en el conjunto de datos. Por defecto es [0.01, 0.05, 0.1].
+        
+        - vecinos : list of int, opcional. Lista de números de vecinos a usar en el algoritmo LOF. Por defecto es [600, 1200, 1500, 2000].
+        
+        - colores : dict, opcional. Diccionario que asigna colores a los valores de predicción de outliers del algoritmo LOF.
+        Por defecto, los outliers se muestran en rojo y los inliers en gris ({-1: "red", 1: "grey"}).
+
+    Returns:
+        
+        Esta función no retorna ningún valor, pero crea y muestra gráficos de dispersión que visualizan los outliers
+        detectados para cada combinación de vecinos y nivel de contaminación especificado.
+    """
+    df_num = dataframe.select_dtypes(include=np.number)
+    # Hacemos una copia del dataframe original para no hacer modificaciones sobre el original
+    df_lof = df_rellenar.copy()
+        
+    # Extraemos las columnas numéricas 
+    col_numericas = df_num.columns.to_list()
+
+    # Generamos todas las posibles combinaciones entre los vecinos y el nivel de contaminación
+    combinaciones = list(product(vecinos, indice_contaminacion))
+
+    # Iteramos por cada posible combinación
+    for combinacion in combinaciones:
+        # Aplicar LOF con un número de vecinos y varias tasas de contaminación
+        clf = LocalOutlierFactor(n_neighbors=combinacion[0], contamination=combinacion[1])
+        y_pred = clf.fit_predict(dataframe[col_numericas])
+
+        num_filas = math.ceil(len(col_numericas) / 2)
+
+        fig, axes = plt.subplots(num_filas, 2, figsize=grafica_size)
+        axes = axes.flat
+
+        # Asegurar que la variable dependiente no está en las columnas numéricas
+        if var_dependiente in col_numericas:
+            col_numericas.remove(var_dependiente)
+
+        for indice, columna in enumerate(col_numericas):
+            # Agregar la predicción de outliers al DataFrame
+            df_lof[f"outlier_{combinacion[1]}_{columna}_{combinacion[0]}vecinos_lof"] = y_pred
+            # Visualizar los outliers en un gráfico
+            sns.scatterplot(x=var_dependiente, 
+                            y=columna, 
+                            data=df_lof,
+                            hue=f"outlier_{combinacion[1]}_{columna}_{combinacion[0]}vecinos_lof", 
+                            palette=colores, 
+                            style=f"outlier_{combinacion[1]}_{columna}_{combinacion[0]}vecinos_lof", 
+                            size=2,
+                            ax=axes[indice])
+                
+            axes[indice].set_title(f"Contaminación = {combinacion[1]} y vecinos {combinacion[0]} y columna {columna.upper()}")
+            print(f"se ha hecho outlier_{combinacion[1]}_{columna}_lof")
+        plt.tight_layout()
+
+        if len(col_numericas) % 2 != 0:
+            fig.delaxes(axes[-1])
+
+        plt.show()
+    print("Se devuelve df Modificado")
+    return df_lof
